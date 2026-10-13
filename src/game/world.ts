@@ -676,6 +676,23 @@ function smoothCityNormals(g: THREE.BufferGeometry, verts: number[]) {
   N.set(out); g.getAttribute("normal").needsUpdate = true;
 }
 
+/** City PBR material class for the chunk shader: 0 none, 1 glass, 2 metal/panel, 3 asphalt, 4 neon, 5 road paint.
+ * Applies only to the cyberpunk palette and to modern blocks inside the Linefield bounds. */
+function cityMat(id: number, wx: number, wz: number) {
+  if (id >= 32 && id <= 54) {
+    if (id === B.TINT_GLASS || id === B.GLASS_CYAN || id === B.GLASS_MAGENTA || id === B.GLASS_GREEN) return 1;
+    if (id === B.SEA_LANTERN || id === B.GLOWSTONE || id === B.NEON_ROD || id === B.NEON_MAGENTA) return 4;
+    if (id === B.IRON_BARS) return 0;
+    return 2;
+  }
+  if (wx < LF_X0 || wx >= LF_X0 + LF_SIZE || wz < LF_Z0 || wz >= LF_Z0 + LF_SIZE) return 0;
+  if (id === B.OFFICE_WINDOW) return 1;
+  if (id === B.STEEL || id === B.CONCRETE) return 2;
+  if (id === B.ASPHALT) return 3;
+  if (id === B.ROAD_LINE) return 5;
+  return 0;
+}
+
 export function buildChunkGeometry(world: World, cx: number, cz: number) {
   const chunk = world.getChunk(cx, cz);
   const pos: number[] = [], uv: number[] = [], col: number[] = [], ind: number[] = [], wind: number[] = [];
@@ -718,6 +735,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
     return v ? Math.pow(v / LMAX, 1.5) : 0;
   };
   const blk: number[] = [];
+  const cm: number[] = []; // per-vertex city material class + local face uv
   const cityV: number[] = [];
   const tileUV = (tile: number, u: number, v: number) => {
     const tc = tile % ATLAS_COLS, tr = Math.floor(tile / ATLAS_COLS);
@@ -745,7 +763,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
               const base = pos.length / 3;
               pos.push(wx + ax + j, y, wz + az + j2, wx + bx + j, y, wz + bz + j2, wx + ax + j, y + sc, wz + az + j2, wx + bx + j, y + sc, wz + bz + j2);
               tileUV(ptile, 0, 0); tileUV(ptile, 1, 0); tileUV(ptile, 0, 1); tileUV(ptile, 1, 1);
-              for (const l of [0.75, 0.75, 1.1, 1.1]) { col.push(l, l, l); blk.push(blkAt(x, y, z)); }
+              for (const l of [0.75, 0.75, 1.1, 1.1]) { col.push(l, l, l); blk.push(blkAt(x, y, z)); cm.push(0, 0, 0); }
               if (side) ind.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
               else ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
             }
@@ -764,7 +782,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
             pos.push(wx + 0.5 + rx, y + Math.max(-0.05, ry + sy * 0.4), wz + 0.5 + rz);
             tileUV(3, rx + 0.5, ry + rz + 0.5);
             const l = 0.75 + 0.25 * (py + 0.5);
-            col.push(l, l, l); blk.push(blkAt(x, y, z));
+            col.push(l, l, l); blk.push(blkAt(x, y, z)); cm.push(0, 0, 0);
             ind.push(base + i / 3);
           }
           continue;
@@ -802,6 +820,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
           const sink = isWater && (y + 1 >= H || world.get(wx, y + 1, wz) !== B.WATER) ? 0.12 : 0;
           const tree = id === B.LOG || id === B.LEAVES;
           const city = !nat && !tree && isCity(id);
+          const mc = cityMat(id, wx, wz);
           for (const c of F.c) {
             const X = ox + x + c[0], Y = y + c[1], Z = oz + z + c[2];
             if (nat) smoothOffset(world, X, Y, Z, off);
@@ -812,6 +831,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
             const u = (tc + (c[3] ? 1 - eps : eps)) / ATLAS_COLS;
             const v = 1 - (tr + 1 - (c[4] ? 1 - eps : eps)) / ATLAS_COLS;
             uv.push(u, v);
+            cm.push(mc, c[3], c[4]);
             // foliage scatters light through itself, so its undersides never go pitch black
             const l = isWater ? 1 : id === B.LEAVES ? 0.9 + 0.1 * F.s * ao[k++] + 0.25 : (0.82 + 0.18 * F.s) * ao[k++];
             col.push(l, l, l);
@@ -828,6 +848,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
   g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   g.setAttribute("blk", new THREE.Float32BufferAttribute(blk, 1));
+  g.setAttribute("cmat", new THREE.Float32BufferAttribute(cm, 3));
   g.setIndex(ind.concat(wind));
   g.addGroup(0, ind.length, 0);
   g.addGroup(ind.length, wind.length, 1);
