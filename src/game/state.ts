@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import * as THREE from "three";
 import { B, isPassable } from "./blocks";
 import { World, type Edits } from "./world";
-import { LF_CX, LF_CZ, LF_GROUND } from "./linefield";
+import { LF_CX, LF_CZ, LF_GROUND, onLinefieldReady, lfFindStreet } from "./linefield";
 
 const SAVE_KEY = "voxelcraft-save-v1";
 export const MAX_HEALTH = 20;
@@ -93,6 +93,14 @@ export function getGame(): Game {
     ui.selected = saved.selected ?? 0;
     if (ui.health <= 0) ui.health = MAX_HEALTH;
   }
+  const resumed = !pos.equals(spawn);
+  // once the city data is in, move the spawn onto a clear street with open sky
+  onLinefieldReady(() => {
+    const s = lfFindStreet();
+    if (!s || !game) return;
+    game.spawn.set(s[0] + 0.5, s[1] + 0.05, s[2] + 0.5);
+    if (!resumed) { game.pos.copy(game.spawn); game.vel.set(0, 0, 0); }
+  });
   game = { world, spawn, pos, vel: new THREE.Vector3(), zombies: [], lastHurt: 0, controls: null };
   return game;
 }
