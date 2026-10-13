@@ -714,7 +714,7 @@ if (vCM.x > 0.5) {
   } else if (cls < 3.5 || cls > 4.5) { // asphalt & road paint: wet puddles
     float wet = smoothstep(0.55, 0.7, cN(vCW.xz * 0.18) * 0.7 + cN(vCW.xz * 0.9) * 0.3);
     vec3 c = gl_FragColor.rgb * (0.9 + grain * 0.2);
-    if (cls > 4.5) c = mix(c, vec3(0.86, 0.85, 0.8) * (gl_FragColor.r > 0.4 ? 1.0 : 0.0) + c * 0.2, 0.0);
+    if (cls > 4.5) wet *= 0.4; // painted stripes stay crisp, shed water
     c = mix(c, c * 0.55, wet);
     c += env * (0.08 + 0.6 * fres) * wet;
     gl_FragColor.rgb = c;
