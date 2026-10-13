@@ -341,6 +341,14 @@ export class World {
 
   private generate(cx: number, cz: number) {
     const c = new Uint8Array(CH * H * CH);
+    // Linefield is the whole world: chunks outside its 512x512 footprint stay empty.
+    this.stampLinefield(cx, cz, c);
+    const le = this.edits[chunkKey(cx, cz)];
+    if (le) for (const i in le) c[+i] = le[i];
+    return c;
+  }
+  private generateLegacy(cx: number, cz: number) {
+    const c = new Uint8Array(CH * H * CH);
     const heights: number[] = [];
     const biomes: number[] = []; // 0 savanna, 1 desert, 2 jungle
     for (let z = 0; z < CH; z++)
@@ -876,7 +884,13 @@ export function moveEntity(world: World, p: THREE.Vector3, v: THREE.Vector3, dt:
   p.y -= 0.05;
   const grounded = collides(world, p, hw, h);
   p.y += 0.05;
-  for (let s = 0; s < steps; s++)
+  // Linefield edges are the map boundary
+  const clampB = () => {
+    p.x = Math.max(LF_X0 + hw, Math.min(LF_X0 + LF_SIZE - hw, p.x));
+    p.z = Math.max(LF_Z0 + hw, Math.min(LF_Z0 + LF_SIZE - hw, p.z));
+  };
+  clampB();
+  for (let s = 0; s < steps; s++, clampB())
     for (const a of ["x", "y", "z"] as const) {
       const d = v[a] * sdt;
       if (!d) continue;
