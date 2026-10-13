@@ -16,7 +16,7 @@ export const LF_CX = LF_X0 + LF_SIZE / 2, LF_CZ = LF_Z0 + LF_SIZE / 2;
 
 interface Tile { data: Uint8Array; off: Uint32Array }
 const tiles = new Map<string, Tile>();
-const pending = new Set<string>();
+if (typeof window !== "undefined") queueMicrotask(() => lfTile(0, 0)); // start the master download immediately
 const listeners: ((tx: number, tz: number) => void)[] = [];
 export const onLinefieldTile = (f: (tx: number, tz: number) => void) => listeners.push(f);
 

@@ -174,7 +174,7 @@ function makeNoise(seed: number) {
 }
 
 export function drawAtlas(): HTMLCanvasElement {
-  const T = 64;
+  const T = 128; // high-res procedural surfaces
   const c = document.createElement("canvas");
   c.width = c.height = T * ATLAS_COLS;
   const ctx = c.getContext("2d")!;
