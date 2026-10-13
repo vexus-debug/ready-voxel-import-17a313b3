@@ -92,6 +92,8 @@ function Sky() {
     const duskAmt = Math.max(0, 1 - Math.abs(sy) * 4) * 0.6;
     col.copy(night).lerp(day, light).lerp(dusk, duskAmt * light + duskAmt * 0.3);
     cloudU.cloudT.value += dt;
+    cityU.uCityTime.value += dt;
+    cityU.citySky.value.copy(zenDay).lerp(col, 0.55).multiplyScalar(0.25 + 0.75 * light);
     cloudU.cloudDay.value = light;
     const fog = scene.fog as THREE.Fog | null;
     if (ui.underwater) {
@@ -624,6 +626,7 @@ function LandscapeFix({ portrait, w, h }: { portrait: boolean; w: number; h: num
 }
 
 function Scene() {
+  const { gl } = useThree();
   const zt = useRef<ZombieTarget>({ zombies: [] });
   const material = useMemo(() => {
     const canvas = drawAtlas();
@@ -633,6 +636,14 @@ function Scene() {
     tex.magFilter = THREE.NearestFilter;
     tex.minFilter = THREE.NearestFilter;
     tex.colorSpace = THREE.SRGBColorSpace;
+    // Linefield architecture samples a smooth, mipmapped, anisotropic copy of the atlas
+    const ctex = new THREE.CanvasTexture(canvas);
+    ctex.magFilter = THREE.LinearFilter;
+    ctex.minFilter = THREE.LinearMipmapLinearFilter;
+    ctex.generateMipmaps = true;
+    ctex.anisotropy = gl.capabilities.getMaxAnisotropy();
+    ctex.colorSpace = THREE.SRGBColorSpace;
+    cityU.cityMap.value = ctex;
     const solid = new THREE.MeshLambertMaterial({ map: tex, vertexColors: true, alphaTest: 0.5 });
     addCloudShadows(solid);
     const water = new THREE.MeshLambertMaterial({ map: tex, vertexColors: true, transparent: true, opacity: 0.72, depthWrite: false, side: THREE.DoubleSide });
@@ -661,13 +672,67 @@ float cN(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
 float cloudShade(vec2 p){ p = (p - vec2(cloudT*${WIND_X.toFixed(2)}, cloudT*${WIND_Z.toFixed(2)})) / 38.0;
   float n = cN(p)*0.6 + cN(p*2.1+5.3)*0.3 + cN(p*4.3+1.7)*0.1; return smoothstep(0.5, 0.68, n); }
 `;
+// Linefield PBR-style surface pass: smooth atlas, Fresnel glass with mullions, brushed metal seams,
+// wet asphalt puddles, AA road paint and flickering neon. cmat.x = class (see cityMat in world.ts), yz = face uv.
+const cityU = {
+  cityMap: { value: null as THREE.Texture | null },
+  citySky: { value: new THREE.Color("#6f9fd8") },
+  uCityTime: { value: 0 },
+};
+const CITY_GLSL = `
+uniform sampler2D cityMap; uniform vec3 citySky; uniform float uCityTime; varying vec3 vCM;
+float cLine(float t, float w){ float d = abs(fract(t) - 0.5); float aa = fwidth(t) * 1.2; return 1.0 - smoothstep(0.5 - w - aa, 0.5 - w, d); }
+`;
+const CITY_MAP = `#include <map_fragment>
+if (vCM.x > 0.5) diffuseColor = vec4(diffuse, opacity) * texture2D(cityMap, vMapUv);`;
+const CITY_SURF = `
+if (vCM.x > 0.5) {
+  float cls = floor(vCM.x + 0.5);
+  vec3 Nn = normalize(normal); vec3 Vv = normalize(vViewPosition);
+  float ndv = clamp(abs(dot(Nn, Vv)), 0.0, 1.0);
+  float fres = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+  vec3 R = reflect(-Vv, Nn);
+  float horizon = clamp(R.y * 0.5 + 0.5, 0.0, 1.0);
+  vec3 env = mix(citySky * 0.35, citySky * 1.15, horizon);
+  vec2 fu = vCM.yz;
+  float grain = cN(vCW.xz * 3.1 + vCW.y * 1.7);
+  if (cls < 1.5) { // reflective glass
+    float mull = max(cLine(fu.x * 2.0 + 0.5, 0.035), cLine(fu.y * 3.0 + 0.5, 0.03));
+    vec3 glass = mix(gl_FragColor.rgb * 0.55, env, 0.25 + 0.65 * fres);
+    float spec = pow(max(dot(R, normalize(vec3(0.3, 0.8, 0.2))), 0.0), 60.0);
+    glass += spec * citySky * 1.2 * cloudDay;
+    gl_FragColor.rgb = mix(glass, vec3(0.08, 0.09, 0.11), mull * 0.85);
+  } else if (cls < 2.5) { // brushed metal panels with reveal seams + bolts
+    float brush = cN(vec2(vCW.x + vCW.z, vCW.y * 40.0)) * 0.5 + cN(vec2((vCW.x + vCW.z) * 60.0, vCW.y)) * 0.5;
+    float seam = max(cLine(fu.x, 0.47), cLine(fu.y, 0.47));
+    vec2 bq = abs(fu - 0.5); float bolt = 1.0 - smoothstep(0.02, 0.035, length(bq - vec2(0.42)));
+    vec3 c = gl_FragColor.rgb * (0.92 + brush * 0.16);
+    c = mix(c, env * 0.6 + c * 0.4, fres * 0.55);
+    c *= 1.0 - seam * 0.45;
+    c += bolt * 0.08;
+    gl_FragColor.rgb = c;
+  } else if (cls < 3.5 || cls > 4.5) { // asphalt & road paint: wet puddles
+    float wet = smoothstep(0.55, 0.7, cN(vCW.xz * 0.18) * 0.7 + cN(vCW.xz * 0.9) * 0.3);
+    vec3 c = gl_FragColor.rgb * (0.9 + grain * 0.2);
+    if (cls > 4.5) c = mix(c, vec3(0.86, 0.85, 0.8) * (gl_FragColor.r > 0.4 ? 1.0 : 0.0) + c * 0.2, 0.0);
+    c = mix(c, c * 0.55, wet);
+    c += env * (0.08 + 0.6 * fres) * wet;
+    gl_FragColor.rgb = c;
+  } else { // neon: glowing core, gentle flicker
+    float h = cH(floor(vCW.xz / 4.0) + floor(vCW.y / 6.0));
+    float fl = 0.92 + 0.08 * sin(uCityTime * (6.0 + h * 9.0) + h * 40.0);
+    fl *= step(0.03, fract(uCityTime * 0.37 + h)) * 0.25 + 0.75;
+    gl_FragColor.rgb = gl_FragColor.rgb * fl + diffuseColor.rgb * (0.35 + 0.5 * (1.0 - cloudDay)) * fl;
+  }
+}
+`;
 function addCloudShadows(m: THREE.Material) {
   m.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, cloudU);
-    sh.vertexShader = "attribute float blk;\nvarying float vBlk;\nvarying vec3 vCW;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\nvCW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvBlk = blk;");
-    sh.fragmentShader = "varying float vBlk;\n" + CLOUD_GLSL + sh.fragmentShader.replace(
+    Object.assign(sh.uniforms, cloudU, cityU);
+    sh.vertexShader = "attribute float blk;\nattribute vec3 cmat;\nvarying float vBlk;\nvarying vec3 vCW;\nvarying vec3 vCM;\n" + sh.vertexShader.replace("#include <project_vertex>", "#include <project_vertex>\nvCW = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvBlk = blk;\nvCM = cmat;");
+    sh.fragmentShader = "varying float vBlk;\n" + CLOUD_GLSL + CITY_GLSL + sh.fragmentShader.replace("#include <map_fragment>", CITY_MAP).replace(
       "#include <fog_fragment>",
-      "gl_FragColor.rgb += diffuseColor.rgb * vec3(1.0, 0.68, 0.36) * vBlk * mix(1.5, 0.15, cloudDay);\n#include <fog_fragment>",
+      "gl_FragColor.rgb += diffuseColor.rgb * vec3(1.0, 0.68, 0.36) * vBlk * mix(1.5, 0.15, cloudDay);\n" + CITY_SURF + "#include <fog_fragment>",
     ).replace(
       "#include <dithering_fragment>",
       "gl_FragColor.rgb *= 1.0 - cloudShade(vCW.xz) * 0.32 * cloudDay;\n#include <dithering_fragment>",
