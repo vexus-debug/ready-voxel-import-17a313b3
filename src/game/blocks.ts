@@ -174,7 +174,7 @@ function makeNoise(seed: number) {
 }
 
 export function drawAtlas(): HTMLCanvasElement {
-  const T = 64;
+  const T = 128; // high-res procedural surfaces
   const c = document.createElement("canvas");
   c.width = c.height = T * ATLAS_COLS;
   const ctx = c.getContext("2d")!;
@@ -449,24 +449,44 @@ export function drawAtlas(): HTMLCanvasElement {
   // sci-fi panel: flat colour, recessed seams, bevel highlight, subtle grime
   const panel = (base: number[], seams = 2) => (u: number, v: number, n: number) => {
     const fu = (u * seams) % 1, fv = (v * seams) % 1;
-    const g = N(u, v, 4, 3);
-    let col = mul(base, 0.9 + g * 0.18 + (n - 0.5) * 0.05);
-    if (fu < 0.04 || fv < 0.04) col = mul(base, 0.55);
-    else if (fu < 0.08 || fv < 0.08) col = mul(base, 1.18);
+    const g = N(u, v, 4, 4), brush = M(u * 0.15, v * 6, 32, 2), grime = N(u + 0.4, v, 2, 3);
+    let col = mul(base, 0.88 + g * 0.14 + brush * 0.08 + (n - 0.5) * 0.03);
+    col = mul(col, 1 - Math.max(0, grime - 0.6) * 0.5 - Math.max(0, v - 0.85) * 0.25); // runoff grime toward the base
+    // hex bolts in each panel corner
+    for (const [bu, bv] of [[0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]]) {
+      const d = Math.hypot(fu - bu, fv - bv);
+      if (d < 0.035) return mul(base, d < 0.018 ? 1.35 : 0.6);
+    }
+    // chamfered recessed seams: dark trough, lit upper/left bevel, shaded lower/right bevel
+    if (fu < 0.02 || fv < 0.02) return mul(base, 0.35);
+    if (fu < 0.045 || fv < 0.045) return mul(col, 1.22);
+    if (fu > 0.965 || fv > 0.965) return mul(col, 0.72);
     return col;
   };
   const clad = (base: number[]) => (u: number, v: number, n: number) => {
-    const row = Math.floor(v * 4), fv = v * 4 - row;
-    let col = mul(base, 0.88 + N(u, v, 8, 3) * 0.22 + (n - 0.5) * 0.06);
-    if (fv > 0.92) col = mul(base, 0.6);
+    const rib = (u * 8) % 1, row = Math.floor(v * 2), fv = v * 2 - row;
+    let col = mul(base, 0.86 + N(u, v, 8, 4) * 0.2 + M(u, v * 0.2, 32, 2) * 0.06 + (n - 0.5) * 0.04);
+    // anodised ribbed siding: rounded rib profile with crisp shadow troughs
+    const prof = Math.sin(rib * Math.PI);
+    col = mul(col, 0.7 + prof * 0.4);
+    if (rib < 0.05) col = mul(base, 0.45);
+    if (fv > 0.975) col = mul(base, 0.4); // horizontal panel joint
+    else if (fv > 0.955) col = mul(col, 1.15);
     return col;
   };
   const glassT = (frame: number[], pane: number[], glow: number) => (u: number, v: number, n: number) => {
-    if (Math.min(u, v, 1 - u, 1 - v) < 0.07) return mul(frame, 0.95 + n * 0.1);
-    let col = mix(pane, mul(pane, 0.55), v);
-    if (Math.abs(u - v - 0.1) < 0.06) col = mix(col, [240, 250, 255], 0.3);
-    if (glow && Math.abs(((v * 4) % 1) - 0.5) < 0.12) col = mix(col, [255, 255, 255], glow);
-    return mul(col, 0.95 + (n - 0.5) * 0.06);
+    const e = Math.min(u, v, 1 - u, 1 - v);
+    if (e < 0.05) return mul(frame, 0.85 + (e < 0.015 ? 0.4 : 0) + n * 0.06);
+    if (Math.abs(u - 0.5) < 0.012) return mul(frame, 1.1); // mullion
+    let col = mix(pane, mul(pane, 0.5), v * 0.8 + N(u, v, 2, 2) * 0.2);
+    const streak = Math.abs(u - v * 0.7 - 0.15);
+    if (streak < 0.05) col = mix(col, [240, 250, 255], 0.35 * (1 - streak / 0.05));
+    if (glow) {
+      const band = Math.abs(((v * 4) % 1) - 0.5);
+      if (band < 0.1) col = mix(col, [255, 255, 255], glow * (1 - band / 0.1));
+      else if (band < 0.2) col = mix(col, mul(pane, 1.4), glow * 0.6); // chromatic halo
+    }
+    return mul(col, 0.97 + (n - 0.5) * 0.03);
   };
   const lamp = (core: number[], rim: number[]) => (u: number, v: number, n: number) => {
     const e = Math.min(u, v, 1 - u, 1 - v);

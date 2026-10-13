@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react";
 import * as THREE from "three";
 import { B, isPassable } from "./blocks";
 import { World, type Edits } from "./world";
+import { LF_CX, LF_CZ, LF_GROUND } from "./linefield";
 
 const SAVE_KEY = "voxelcraft-save-v1";
 export const MAX_HEALTH = 20;
@@ -80,9 +81,8 @@ export function getGame(): Game {
   }
   const seed = saved?.seed ?? Math.floor(Math.random() * 1e9);
   const world = new World(seed, (saved?.edits as Edits) ?? {});
-  const [sx, sy, sz] = world.castleSpawn();
-  const spawn = new THREE.Vector3(sx + 0.5, sy + 0.5, sz + 0.5);
-  let pos = saved?.pos && saved?.castle ? new THREE.Vector3(...saved.pos) : spawn.clone();
+  const spawn = new THREE.Vector3(LF_CX + 0.5, LF_GROUND + 1.5, LF_CZ + 0.5);
+  let pos = saved?.pos && saved?.lf ? new THREE.Vector3(...saved.pos) : spawn.clone();
   // never resume inside water or terrain
   const here = world.get(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z)) ?? 0;
   if (here === B.WATER || (here !== 0 && !isPassable(here))) pos = spawn.clone();
@@ -110,7 +110,7 @@ export function saveGame() {
         counts: ui.counts,
         time: ui.time,
         selected: ui.selected,
-        castle: 1,
+        lf: 1,
       }),
     );
     ui.lastSaved = Date.now();
