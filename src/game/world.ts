@@ -763,7 +763,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
               const base = pos.length / 3;
               pos.push(wx + ax + j, y, wz + az + j2, wx + bx + j, y, wz + bz + j2, wx + ax + j, y + sc, wz + az + j2, wx + bx + j, y + sc, wz + bz + j2);
               tileUV(ptile, 0, 0); tileUV(ptile, 1, 0); tileUV(ptile, 0, 1); tileUV(ptile, 1, 1);
-              for (const l of [0.75, 0.75, 1.1, 1.1]) { col.push(l, l, l); blk.push(blkAt(x, y, z)); }
+              for (const l of [0.75, 0.75, 1.1, 1.1]) { col.push(l, l, l); blk.push(blkAt(x, y, z)); cm.push(0, 0, 0); }
               if (side) ind.push(base, base + 2, base + 1, base + 2, base + 3, base + 1);
               else ind.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
             }
@@ -782,7 +782,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
             pos.push(wx + 0.5 + rx, y + Math.max(-0.05, ry + sy * 0.4), wz + 0.5 + rz);
             tileUV(3, rx + 0.5, ry + rz + 0.5);
             const l = 0.75 + 0.25 * (py + 0.5);
-            col.push(l, l, l); blk.push(blkAt(x, y, z));
+            col.push(l, l, l); blk.push(blkAt(x, y, z)); cm.push(0, 0, 0);
             ind.push(base + i / 3);
           }
           continue;
@@ -848,6 +848,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
   g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
   g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
   g.setAttribute("blk", new THREE.Float32BufferAttribute(blk, 1));
+  g.setAttribute("cmat", new THREE.Float32BufferAttribute(cm, 3));
   g.setIndex(ind.concat(wind));
   g.addGroup(0, ind.length, 0);
   g.addGroup(ind.length, wind.length, 1);
