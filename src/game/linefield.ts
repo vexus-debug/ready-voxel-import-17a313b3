@@ -18,6 +18,9 @@ interface Tile { data: Uint8Array; off: Uint32Array }
 const tiles = new Map<string, Tile>();
 if (typeof window !== "undefined") queueMicrotask(() => lfTile(0, 0)); // start the master download immediately
 const listeners: ((tx: number, tz: number) => void)[] = [];
+const ready: (() => void)[] = [];
+/** fires once the whole bundle is in memory */
+export const onLinefieldReady = (f: () => void) => (tiles.size >= NT * NT ? f() : ready.push(f));
 export const onLinefieldTile = (f: (tx: number, tz: number) => void) => listeners.push(f);
 
 const NT = LF_SIZE / LF_TS;
@@ -43,6 +46,7 @@ async function loadAll() {
       tiles.set(`${i % NT}_${(i / NT) | 0}`, { data, off });
     }
     for (let i = 0; i < NT * NT; i++) for (const f of listeners) f(i % NT, (i / NT) | 0);
+    for (const f of ready) f();
   } catch (e) {
     console.warn("Linefield bundle failed", e);
     started = false;
@@ -72,4 +76,28 @@ export function lfColumn(u: number, v: number, out: (y: number, id: number) => v
     y += len;
   }
   return true;
+}
+
+/** Top solid y of a column (LF_BASE - 1 if empty). Bundle must be loaded. */
+function colTop(u: number, v: number) {
+  let top = LF_BASE - 1;
+  lfColumn(u, v, (y) => { if (y > top) top = y; });
+  return top;
+}
+/** Nearest open street spot to the city centre: a 5x5 patch at street level with open sky above. */
+export function lfFindStreet(): [number, number, number] | null {
+  const c = LF_SIZE / 2, R = 2, M = R + 2;
+  for (let r = 0; r < LF_SIZE / 2 - M; r++)
+    for (let dz = -r; dz <= r; dz++)
+      for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+        const u = c + dx, v = c + dz;
+        if (u < M || v < M || u >= LF_SIZE - M || v >= LF_SIZE - M) continue;
+        const g = colTop(u, v);
+        if (g < LF_GROUND - 2 || g > LF_GROUND + 1) continue;
+        let ok = true;
+        for (let z = -R; z <= R && ok; z++) for (let x = -R; x <= R && ok; x++) if (colTop(u + x, v + z) !== g) ok = false;
+        if (ok) return [LF_X0 + u, g + 1, LF_Z0 + v];
+      }
+  return null;
 }
