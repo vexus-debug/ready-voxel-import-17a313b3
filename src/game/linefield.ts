@@ -20,32 +20,40 @@ const pending = new Set<string>();
 const listeners: ((tx: number, tz: number) => void)[] = [];
 export const onLinefieldTile = (f: (tx: number, tz: number) => void) => listeners.push(f);
 
-async function load(tx: number, tz: number) {
-  const k = `${tx}_${tz}`;
-  if (tx < 0 || tz < 0 || tx >= LF_SIZE / LF_TS || tz >= LF_SIZE / LF_TS) return;
+const NT = LF_SIZE / LF_TS;
+let started = false;
+/** One request for the whole city: gzip(header of 64 x [u32 offset, u32 length], tile bodies). */
+async function loadAll() {
   try {
-    const res = await fetch(`/linefield/lf_${k}.bin`);
+    const res = await fetch(`/linefield/linefield_all.bin`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const ds = res.body!.pipeThrough(new DecompressionStream("gzip"));
-    const data = new Uint8Array(await new Response(ds).arrayBuffer());
-    const off = new Uint32Array(LF_TS * LF_TS);
-    let p = 0;
-    for (let i = 0; i < off.length; i++) { off[i] = p; p += 2 + (data[p] | (data[p + 1] << 8)) * 2; }
-    tiles.set(k, { data, off });
-    for (const f of listeners) f(tx, tz);
+    const buf = new Uint8Array(await res.arrayBuffer());
+    // tolerate servers that already stripped the gzip layer
+    const all = buf[0] === 0x1f && buf[1] === 0x8b
+      ? new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer())
+      : buf;
+    const dv = new DataView(all.buffer, all.byteOffset, all.byteLength);
+    const hdr = NT * NT * 8;
+    for (let i = 0; i < NT * NT; i++) {
+      const o = dv.getUint32(i * 8, true), len = dv.getUint32(i * 8 + 4, true);
+      const data = all.subarray(hdr + o, hdr + o + len);
+      const off = new Uint32Array(LF_TS * LF_TS);
+      let p = 0;
+      for (let j = 0; j < off.length; j++) { off[j] = p; p += 2 + (data[p] | (data[p + 1] << 8)) * 2; }
+      tiles.set(`${i % NT}_${(i / NT) | 0}`, { data, off });
+    }
+    for (let i = 0; i < NT * NT; i++) for (const f of listeners) f(i % NT, (i / NT) | 0);
   } catch (e) {
-    console.warn("Linefield tile failed", k, e);
-  } finally {
-    pending.delete(k);
+    console.warn("Linefield bundle failed", e);
+    started = false;
   }
 }
 
-/** Tile for local column (u,v) or null (and starts loading it). */
+/** Tile (tx,tz) or null; the first call starts the single master download. */
 export function lfTile(tx: number, tz: number): Tile | null {
-  const k = `${tx}_${tz}`;
-  const t = tiles.get(k);
+  const t = tiles.get(`${tx}_${tz}`);
   if (t) return t;
-  if (!pending.has(k)) { pending.add(k); load(tx, tz); }
+  if (!started) { started = true; loadAll(); }
   return null;
 }
 
